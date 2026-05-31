@@ -1,6 +1,6 @@
 public class SimpleThreads {
 
-    // Display a message, preceded by the name of the current thread
+    // Exibe uma mensagem precedida pelo nome da thread atual
     static void threadMessage(String message) {
         String threadName = Thread.currentThread().getName();
         System.out.format("%s: %s%n", threadName, message);
@@ -17,55 +17,103 @@ public class SimpleThreads {
             };
             try {
                 for (int i = 0; i < importantInfo.length; i++) {
-                    // Pause for 4 seconds
+                    // Pausa de 4 segundos
                     Thread.sleep(4000);
-                    // Print a message
+                    // Imprime a mensagem
                     threadMessage(importantInfo[i]);
                 }
             } catch (InterruptedException e) {
-                threadMessage("I wasn't done!");
+                threadMessage("Eu não tinha terminado!");
             }
+        }
+    }
+
+    // Tarefa CPU-intensiva: conta números primos até LIMIT usando divisão por tentativa.
+    // Ao contrário do MessageLoop, nunca bloqueia em sleep(), portanto InterruptedException
+    // não é lançada naturalmente — a thread precisa consultar isInterrupted() por conta
+    // própria a cada iteração para permanecer interrompível.
+    private static class PrimeCounter
+        implements Runnable {
+        private static final long LIMIT = 10_000_000L;
+
+        public void run() {
+            long count = 0;
+            threadMessage("Contando primos até " + LIMIT + "...");
+            for (long n = 2; n <= LIMIT; n++) {
+                // Verifica antes de cada candidato para que a thread possa ser parada prontamente
+                if (Thread.currentThread().isInterrupted()) {
+                    threadMessage("Interrompido! Contei " + count + " primos antes do prazo.");
+                    return;
+                }
+                if (isPrime(n)) count++;
+            }
+            threadMessage("Concluído! Encontrei " + count + " primos até " + LIMIT);
+        }
+
+        private boolean isPrime(long n) {
+            for (long i = 2; i * i <= n; i++) {
+                if (n % i == 0) return false;
+            }
+            return true;
         }
     }
 
     public static void main(String args[])
         throws InterruptedException {
 
-        // Delay, in milliseconds before we interrupt MessageLoop thread (default one hour)
+        // Tempo de espera em milissegundos antes de interromper a thread MessageLoop (padrão: 1 hora)
         long patience = 1000 * 60 * 60;
 
-        // If command line argument present, gives patience in seconds
+        // Se um argumento for passado na linha de comando, define o patience em segundos
         if (args.length > 0) {
             try {
                 patience = Long.parseLong(args[0]) * 1000;
             } catch (NumberFormatException e) {
-                System.err.println("Argument must be an integer.");
+                System.err.println("O argumento deve ser um inteiro.");
                 System.exit(1);
             }
         }
 
-        threadMessage("Starting MessageLoop thread");
+        threadMessage("Iniciando a thread MessageLoop");
         long startTime = System.currentTimeMillis();
         Thread t = new Thread(new MessageLoop());
 
-	// Put the MessageLoop thread to run
+        // Inicia a thread MessageLoop
         t.start();
 
-        threadMessage("Waiting for MessageLoop thread to finish");
-	
-        // loop until MessageLoop thread exits
+        // --- PrimeCounter: thread CPU-intensiva com prazo máximo de execução ---
+        long cpuPatience = 5000; // prazo de 5 segundos para a tarefa CPU-intensiva
+        threadMessage("Iniciando a thread PrimeCounter (prazo: " + cpuPatience / 1000 + "s)");
+        long cpuStartTime = System.currentTimeMillis();
+        Thread cpuThread = new Thread(new PrimeCounter(), "PrimeCounter");
+        cpuThread.start();
+
+        // Monitora o PrimeCounter e aplica o prazo, seguindo o mesmo padrão do MessageLoop abaixo
+        while (cpuThread.isAlive()) {
+            cpuThread.join(1000);
+            if (((System.currentTimeMillis() - cpuStartTime) > cpuPatience) && cpuThread.isAlive()) {
+                threadMessage("Tarefa CPU excedeu o prazo, interrompendo PrimeCounter!");
+                cpuThread.interrupt();
+                cpuThread.join();
+            }
+        }
+        // -----------------------------------------------------------------------
+
+        threadMessage("Aguardando a thread MessageLoop terminar");
+
+        // Aguarda até que a thread MessageLoop encerre
         while (t.isAlive()) {
-            threadMessage("Still waiting...");
-            // Wait maximum of 1 second for MessageLoop thread to finish
+            threadMessage("Ainda aguardando...");
+            // Espera no máximo 1 segundo para a thread MessageLoop terminar
             t.join(1000);
             if (((System.currentTimeMillis() - startTime) > patience) && t.isAlive()) {
-                threadMessage("Tired of waiting!");
-		// Force the interruption of the MainLoop thread
+                threadMessage("Cansado de esperar!");
+                // Força a interrupção da thread MessageLoop
                 t.interrupt();
-                // ...and wait for it to finish -- shouldn't be long now 
+                // Aguarda ela terminar — não deve demorar muito
                 t.join();
             }
         }
-        threadMessage("Finally!");
+        threadMessage("Finalmente!");
     }
 }
